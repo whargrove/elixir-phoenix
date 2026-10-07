@@ -1,0 +1,45 @@
+#!/usr/bin/env bash
+#MISE description="Generate a Phoenix app with VibeKit, a pinned toolchain and a Postgres compose file"
+#USAGE arg "<name>" help="App name in snake_case, e.g. my_app"
+#USAGE flag "--path <path>" default=".." help="Directory to create the app in (relative to this template)"
+set -euo pipefail
+
+template_root="$MISE_CONFIG_ROOT"
+name="$usage_name"
+app_dir="$(cd "$usage_path" && pwd)/$name"
+
+if [[ -e "$app_dir" ]]; then
+  echo "error: $app_dir already exists" >&2
+  exit 1
+fi
+
+# Capture the template's pinned versions before leaving its directory.
+erlang_version="$(mise current erlang)"
+elixir_version="$(mise current elixir)"
+
+mix archive.install hex igniter_new --force
+mix archive.install hex phx_new --force
+
+cd "$(dirname "$app_dir")"
+mix igniter.new "$name" --with phx.new --install vibe_kit --yes
+
+cd "$app_dir"
+mise use --path mise.toml "erlang@$erlang_version" "elixir@$elixir_version"
+cp "$template_root/template/compose.yaml" compose.yaml
+mix run --no-start "$template_root/template/post_generate.exs"
+mix format
+
+if [[ -d .git ]]; then
+  git add -A
+  git commit --quiet -m "Apply template post-generation fixes"
+fi
+
+cat <<EOF
+
+Created $app_dir
+
+  cd $app_dir
+  docker compose up -d --wait   # POSTGRES_PORT=<port> to avoid a port clash
+  mix ecto.setup
+  mix ci
+EOF
